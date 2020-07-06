@@ -1,12 +1,13 @@
 package com.heavenize.parsing.bloomberg;
 
+import java.util.List;
 import java.util.ArrayList;
 
 public class Security {
 	private int nbDividends;
 	private String bloombergTicker;
 	private String frequency;
-	private ArrayList<Dividend> dividends = new ArrayList<Dividend>();
+	private List<Dividend> dividends = new ArrayList<Dividend>();
 
 
 	Security(String ticker) {
@@ -14,7 +15,7 @@ public class Security {
 		this.nbDividends = 0;
 		this.frequency = null;
 		this.dividends = null;
-	}
+		}
 
 	Security(String ticker, int nbDividends) {
 		this.bloombergTicker = ticker;
@@ -31,7 +32,7 @@ public class Security {
 	public String getFrequency() {
 		return this.frequency;
 	}
-	public ArrayList<Dividend> getDividends() {
+	public List<Dividend> getDividends() {
 		return this.dividends;
 	}
 	public Dividend getDividend(int i) {

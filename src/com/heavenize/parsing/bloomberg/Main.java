@@ -4,47 +4,31 @@ import java.io.*;
 import java.util.regex.*;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.ArrayList;
+import java.util.List;
+import java.util.LinkedList;
 
 public class Main {
 
 	private static String directoryToExtract = "C:/Users/cgran/OneDrive/Documents/Projects/02-ReadBloomberg/Dividend History Per Share/";
-	private static String exportPathName = "C:/Users/cgran/OneDrive/Documents/Projects/exportedTest/";
+	private static String exportPathName = "C:/Users/cgran/OneDrive/Documents/Projects/tester1/";
 	private static String finalFilename = "Combined_Div_Info.csv";
+	
+	private static String csvDivider = ";";
+	private static String tickerRegex = "^(BBG00.[A-Z0-9]{6})";
 
 	public static void main(String args[]) throws Exception {
 
 		String dateFormat = "MM/dd/yyyy";
 
 		File[] files = new File(directoryToExtract).listFiles();
+		List<Security> securities = new LinkedList<Security>();
 		
 		for(File file : files) {
 			String line = extractInfoLine(file.getAbsolutePath());
-
-			// divide line into 3 parts: security info, document info, dividend info
-			String[] blocks = line.split(";", 5);
-
-			
-			
-			if(blocks.length<=1) {
-				Security security = extractSecurityTicker(blocks);
-				PrintCSV.writeCSV(dateFormat, exportPathName, security);
-
-			} else {
-				Security security = extractSecurityInfo(blocks);
-				ChunkInfo chunkInfo = extractChunkInfo(blocks);
-
-				ArrayList<Chunk> chunks = splitIntoChunkList(chunkInfo);
-				for(Chunk c : chunks) {
-					security.addDividend(parseChunk(c));
-				}
-				security.setFrequency(security.getDividend(0).getFrequency());
-
-				PrintCSV.writeCSV(dateFormat, exportPathName, security);
-			}
-
+			Security security = parseSecurity(line);
+			securities.add(security);
 		}
-		PrintCSV.combineFiles(exportPathName, finalFilename);
+		PrintCSV.writeCSV(dateFormat, exportPathName, finalFilename, securities);
 
 	}
 
@@ -57,13 +41,12 @@ public class Main {
 			line = br.readLine();
 
 			// initialize pattern and matcher for regEx comparison
-			Pattern p2 = Pattern.compile("^(BBG00.[A-Z0-9]{6})");
+			Pattern p2 = Pattern.compile(tickerRegex);
 			while(line != null) {
-				/*Pattern p1 = Pattern.compile("DVD_[A-Z]{3-4}");
-					Matcher m1 = p1.matcher(line);*/
 				Matcher m2 = p2.matcher(line);
-				if(m2.find()) break;		// if line matches leaves loop
-				else {
+				if(m2.find()) {
+					break;		// if line matches leaves loop
+				} else {
 					line = br.readLine();
 				}
 			}
@@ -75,21 +58,33 @@ public class Main {
 
 		return line;
 	}
+	// from the line of information obtains the security for a file
+	private static Security parseSecurity(String line) throws Exception {
+		String[] blocks = line.split(";", 5);
 
-	// method that split the line
-	// if error, only contains the ticker
-	private static Security extractSecurityTicker(String[] blocks) {
-		String ticker = (blocks[0].split("\\|"))[0];
-		Security security = new Security(ticker);
+		Security security = null;
+
+		if (blocks.length != 0) {
+			String ticker = (blocks[0].split("\\|"))[0];
+			if(blocks.length<=1) { 		// if check if file only contains bloomberg ticker
+				security = new Security(ticker);
+				
+			} else {
+				security = new Security(ticker, Integer.parseInt(blocks[2])); // assume the nb of dividends is preceded by the symbol for integers		
+				ChunkInfo chunkInfo = extractChunkInfo(blocks);
+
+				List<Chunk> chunks = splitIntoChunkList(chunkInfo);
+				for(Chunk currentChunk : chunks) {
+					security.addDividend(parseChunk(currentChunk));
+				}
+				security.setFrequency(security.getDividend(0).getFrequency());
+
+			}
+		}
 		return security;
 	}
-	// divide line into 3 parts: security info, document info, dividend info
-	private static Security extractSecurityInfo(String[] blocks) {
-		String ticker = (blocks[0].split("\\|"))[0];
-		Security security = new Security(ticker, Integer.parseInt(blocks[2])); // assume the nb of dividends is preceded by the symbol for integers		
-		return security;
-	}
-
+	
+	
 	private static ChunkInfo extractChunkInfo(String[] blocks) {
 		int nbCategories = Integer.parseInt(blocks[3]);	// assume the nb of categories per div is preceded by the symbol for int
 		String divInfo = blocks[4];
@@ -99,76 +94,77 @@ public class Main {
 	}
 
 	// method that divides the dividend information block into chunks by dividend
-	private static ArrayList<Chunk> splitIntoChunkList(ChunkInfo chunkInfo) {
+	private static LinkedList<Chunk> splitIntoChunkList(ChunkInfo chunkInfo) {
 		int sizeChunk = chunkInfo.getNbCategories()*2;
-		String[] blocks = chunkInfo.getInfo().split(";");
+		String[] blocks = chunkInfo.getInfo().split(csvDivider);
 
 		int i = 0;
-		ArrayList<Chunk> chunks = new ArrayList<Chunk>();
+		LinkedList<Chunk> chunks = new LinkedList<Chunk>();
 		Chunk chunk = new Chunk(sizeChunk);
-		for(String s : blocks) {
-			if(i == chunk.getSize()) {
+		for(String currentString : blocks) {
+			if(i/sizeChunk == 1) {				// when all elements added to the chunk add to chunklist
 				chunks.add(chunk);
 				chunk = new Chunk(sizeChunk);
 				i=0;
 			}
-			chunk.addValue(s);
+			chunk.addValue(currentString);
 			i++;
 		}
 		return chunks;
 	}
 
-	// method that parses one chunk into values for a dividend
+	/**
+	 * method that parses one chunk into values for a dividend
+	 * @param chunk
+	 * @return
+	 * @throws Exception
+	 */
 	public static Dividend parseChunk(Chunk chunk) throws Exception {
 		SimpleDateFormat format = new SimpleDateFormat("MM/dd/yyyy");
 		Dividend div = new Dividend();
 		// assume form Declared Date/ExDate/Record Date/Pay Date/Amount/Frequency/Type
 		int placement = 1;
 		for(int i=0; i<chunk.getSize();i+=2) {
-			if(chunk.getValue(i+1).equals(" ")) {
-
-			}else if(placement == 1) {
-				if(chunk.getValue(i+1).equals(" ")) {
-					div.setDeclaredDate(null);
-				} else {
+			switch(placement) {
+			case 1:
+				if(!chunk.getValue(i+1).equals(" ")) {
 					Date date = format.parse(chunk.getValue(i+1)); // skip int that indicates type
 					div.setDeclaredDate(date);
 				}
-			} else if(placement == 2)	{
-				if(chunk.getValue(i+1).equals(" ")) {
-					div.setExDate(null);
-				} else {
+				break;
+			case 2:
+				if(!chunk.getValue(i+1).equals(" ")) {
 					Date date = format.parse(chunk.getValue(i+1)); // skip int that indicates type
 					div.setExDate(date);
 				}
-			} else if(placement == 3) {
-				if(chunk.getValue(i+1).equals(" ")) {
-					div.setRecordDate(null);
-				} else {
+				break;
+			case 3:
+				if(!chunk.getValue(i+1).equals(" ")) {
 					Date date = format.parse(chunk.getValue(i+1)); // skip int that indicates type
 					div.setRecordDate(date);
 				}
-			} else if(placement == 4) {
-				if(chunk.getValue(i+1).equals(" ")) {
-					div.setPayDate(null);
-				} else {
+				break;
+			case 4: 
+				if(!chunk.getValue(i+1).equals(" ")) {
 					Date date = format.parse(chunk.getValue(i+1)); // skip int that indicates type
 					div.setPayDate(date);
 				}
-			} else if(placement == 5) {
+				break;
+			case 5:
 				if(chunk.getValue(i+1).equals(" ") | chunk.getValue(i+1).equals("N.A.")) {
 					div.setAmount(0);
 				} else {
 					double d = Double.parseDouble(chunk.getValue(i+1)); // skip int that indicates type
 					div.setAmount(d);
 				}
-			} else if(placement == 6) {
+				break;
+			case 6:
 				div.setFrequency(chunk.getValue(i+1)); // skip int that indicates type
-			}
-			else if(placement == 7) {
+				break;
+			case 7: 
 				div.setType(chunk.getValue(i+1)); // skip int that indicates type
+				break;
 			}
-
 			placement++;
 		}
 		return div;
